@@ -1,0 +1,93 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.0;
+
+contract InsurancePool {
+    address public owner;
+    uint256 public totalPoolBalance;
+    uint256 public premiumRate; // in wei
+
+    mapping(address => uint256) public userPremiums;
+
+    // Events for logging contract activities
+    event PremiumPaid(address indexed user, uint256 amount);
+    event PremiumRefunded(address indexed user, uint256 excessAmount);
+    event Withdrawn(uint256 amount);
+    event PremiumRateChanged(uint256 newRate);
+    event PayoutClaimed(address indexed claimant, uint256 amount);
+
+    constructor() {
+        owner = msg.sender;
+    }
+
+    modifier onlyOwner() {
+        require(msg.sender == owner, "Not the owner");
+        _;
+    }
+
+    /// @notice Sets the premium rate for the insurance pool
+    /// @param _rate The new premium rate in wei
+    function setPremiumRate(uint256 _rate) public onlyOwner {
+        premiumRate = _rate;
+        emit PremiumRateChanged(_rate);
+    }
+
+
+    
+
+    /// @notice Allows users to pay their insurance premium
+    /// @dev Refunds excess payment if the sent value is greater than the premium rate
+    function payPremium() public payable {
+        require(msg.value >= premiumRate, "Insufficient premium amount");
+
+        uint256 excessAmount = msg.value - premiumRate;
+
+        // Update contract state before external calls
+        userPremiums[msg.sender] += premiumRate;
+        totalPoolBalance += premiumRate;
+
+        // Refund any excess payment securely
+        if (excessAmount > 0) {
+            (bool sent, ) = payable(msg.sender).call{value: excessAmount}("");
+            require(sent, "Failed to refund excess payment");
+            emit PremiumRefunded(msg.sender, excessAmount);
+        }
+
+        emit PremiumPaid(msg.sender, premiumRate);
+    }
+
+    /// @notice Allows the owner to withdraw funds from the insurance pool
+    /// @param amount The amount to withdraw in wei
+    function withdraw(uint256 amount) public onlyOwner {
+        require(amount <= totalPoolBalance, "Insufficient funds in pool");
+
+        totalPoolBalance -= amount;
+
+        (bool sent, ) = payable(owner).call{value: amount}("");
+        require(sent, "Failed to send Ether");
+
+        emit Withdrawn(amount);
+    }
+
+    /// @notice Allows users to claim their payout, demonstrating a pull-over-push pattern
+    /// @param claimant The address of the user claiming the payout
+    function claimPayout(address payable claimant) public {
+        uint256 payoutAmount = userPremiums[claimant];
+        require(payoutAmount > 0, "No payout available");
+
+        userPremiums[claimant] = 0; // Reset to prevent reentrancy
+
+        (bool sent, ) = claimant.call{value: payoutAmount}("");
+        require(sent, "Failed to claim payout");
+
+        emit PayoutClaimed(claimant, payoutAmount);
+    }
+
+    /// @notice Allows users to check their paid premiums
+    /// @param user The address of the user querying their premium status
+    /// @return The total premiums paid by the user
+    function checkPremiumsPaid(address user) public view returns (uint256) {
+        return userPremiums[user];
+    }
+
+    // Additional security, optimizations, and functionality as per your needs
+}
